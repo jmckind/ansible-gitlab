@@ -1,0 +1,13 @@
+---
+# file: group_vars/all
+
+system_username: git
+
+db_name: gitlabhq_production
+db_username: git
+db_password: secret
+
+gitlab_repo: https://gitlab.com/gitlab-org/gitlab-ce.git
+gitlab_version: 6-9-stable
+gitlab_dir: "/home/{{ system_username }}/gitlab"
+gitlab_satellite_dir: "/home/{{ system_username }}/gitlab-satellites"

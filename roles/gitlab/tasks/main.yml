@@ -1,0 +1,59 @@
+---
+# file: roles/gitlab/tasks/main.yml
+
+- name: ensure common packages are present
+  apt: name={{ item }} state=latest update_cache=yes
+  with_items:
+    - build-essential
+    - checkinstall
+    - git-core
+    - libcurl4-openssl-dev
+    - libffi-dev
+    - libgdbm-dev
+    - libicu-dev
+    - libncurses5-dev
+    - libreadline-dev
+    - libssl-dev
+    - libxml2-dev
+    - libxslt-dev
+    - libyaml-dev
+    - logrotate
+    - redis-server
+    - ruby2.0
+    - zlib1g-dev
+
+- name: ensure the GitLab system user is present
+  user: name={{ system_username }} shell=/usr/sbin/nologin comment="GitLab"
+
+- name: ensure the GitLab database user is present
+  postgresql_user: name={{ db_username }} password={{ db_password }} role_attr_flags=CREATEDB,NOSUPERUSER
+
+- name: ensure the GitLab database is present
+  postgresql_db: name={{ db_name }} owner={{ db_username }} login_user=postgres
+
+- name: ensure the GitLab source is present
+  git: repo={{ gitlab_repo }} version={{ gitlab_version }} dest={{ gitlab_dir }}
+
+- name: ensure the GitLab configuration file is present
+  template: src=config/gitlab.yml.j2 dest="{{ gitlab_dir }}/config/gitlab.yml" mode=0644 owner={{ system_username }} group={{ system_username }} #"
+
+- name: ensure that the GitLab working directories are present
+  file: path="{{ gitlab_dir }}/{{ item }}" state=directory mode="u+rwX" ownder={{ system_username }} group={{ system_username }} #"
+  with_items:
+    - log
+    - public/uploads
+    - tmp
+    - tmp/pids
+    - tmp/sockets
+
+- name: ensure that the GitLab satellite directory is present
+  file: path={{ gitlab_satellite_dir }} state=directory ownder={{ system_username }} group={{ system_username }}
+
+- name: ensure that permissions are set for the GitLab satellite directory
+  file: path={{ gitlab_satellite_dir }} mode="u+rwx,g+rx,o-rwx" ownder={{ system_username }} group={{ system_username }}
+  with_items:
+    - log
+    - tmp
+
+- name: ensure the GitLab database configuration file is present
+  template: src=config/database.yml.j2 dest="{{ gitlab_dir }}/config/database.yml" mode=0600 owner={{ system_username }} group={{ system_username }} #"
