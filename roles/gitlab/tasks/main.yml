@@ -1,8 +1,8 @@
 ---
 # file: roles/gitlab/tasks/main.yml
 
-- name: ensure common packages are present
-  apt: name={{ item }} state=latest update_cache=yes
+- name: ensure required packages are present
+  apt: name={{ item }} state=present
   with_items:
     - build-essential
     - checkinstall
@@ -22,6 +22,12 @@
     - ruby2.0
     - zlib1g-dev
 
+- name: ensure required ruby gems are installed
+  gem: name={{ item }} state=latest user_install=no executable=/usr/bin/gem2.0
+  with_items:
+    - bundler
+    - rake
+
 - name: ensure the GitLab system user is present
   user: name={{ system_username }} shell=/usr/sbin/nologin comment="GitLab"
 
@@ -34,11 +40,14 @@
 - name: ensure the GitLab source is present
   git: repo={{ gitlab_repo }} version={{ gitlab_version }} dest={{ gitlab_dir }}
 
+- name: ensure that permissions are set for the GitLab source directory
+  file: path={{ gitlab_dir }} mode=0760 owner={{ system_username }} group={{ system_username }}
+
 - name: ensure the GitLab configuration file is present
   template: src=config/gitlab.yml.j2 dest="{{ gitlab_dir }}/config/gitlab.yml" mode=0644 owner={{ system_username }} group={{ system_username }} #"
 
 - name: ensure that the GitLab working directories are present
-  file: path="{{ gitlab_dir }}/{{ item }}" state=directory mode="u+rwX" ownder={{ system_username }} group={{ system_username }} #"
+  file: path="{{ gitlab_dir }}/{{ item }}" state=directory mode=0760 owner={{ system_username }} group={{ system_username }} #"
   with_items:
     - log
     - public/uploads
@@ -47,13 +56,25 @@
     - tmp/sockets
 
 - name: ensure that the GitLab satellite directory is present
-  file: path={{ gitlab_satellite_dir }} state=directory ownder={{ system_username }} group={{ system_username }}
+  file: path={{ gitlab_satellite_dir }} state=directory owner={{ system_username }} group={{ system_username }}
 
 - name: ensure that permissions are set for the GitLab satellite directory
-  file: path={{ gitlab_satellite_dir }} mode="u+rwx,g+rx,o-rwx" ownder={{ system_username }} group={{ system_username }}
+  file: path={{ gitlab_satellite_dir }} mode=0760 owner={{ system_username }} group={{ system_username }}
   with_items:
     - log
     - tmp
 
 - name: ensure the GitLab database configuration file is present
   template: src=config/database.yml.j2 dest="{{ gitlab_dir }}/config/database.yml" mode=0600 owner={{ system_username }} group={{ system_username }} #"
+
+- name: ensure the gitlab gems are installed
+  sudo_user: "{{ system_username }}"
+  shell: bundle install -j{{ ansible_processor_cores }} --deployment --without development test mysql aws > /tmp/bundle-gems chdir={{ gitlab_dir }} creates=/tmp/bundle-gems
+
+- name: ensure the gitlab shell is installed
+  sudo_user: "{{ system_username }}"
+  shell: bundle exec rake gitlab:shell:install[v1.9.5] REDIS_URL=redis://localhost:6379 RAILS_ENV=production > /tmp/bundle-shell chdir={{ gitlab_dir }} creates=/tmp/bundle-shell
+
+- name: ensure the gitlab database is initialized
+  sudo_user: "{{ system_username }}"
+  shell: echo 'yes' | bundle exec rake gitlab:shell:install[v1.9.5] REDIS_URL=redis://localhost:6379 RAILS_ENV=production > /tmp/gitlab-db chdir={{ gitlab_dir }} creates=/tmp/gitlab-db
