@@ -11,3 +11,8 @@ gitlab_repo: https://gitlab.com/gitlab-org/gitlab-ce.git
 gitlab_version: 6-9-stable
 gitlab_dir: "/home/{{ system_username }}/gitlab"
 gitlab_satellite_dir: "/home/{{ system_username }}/gitlab-satellites"
+gitlab_hostname: "{{ ansible_fqdn }}"
+gitlab_port: 80
+gitlab_https: false
+gitlab_default_email: example@example.com
+gitlab_support_email: support@example.com
