@@ -1,0 +1,5 @@
+---
+# file: roles/gitlab/handlers/main.yml
+
+- name: restart gitlab
+  service: name=gitlab state=restarted
