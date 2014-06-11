@@ -2,17 +2,26 @@
 # file: group_vars/all
 
 system_username: git
+system_user_home: /home/git
 
 db_name: gitlabhq_production
 db_username: git
 db_password: secret
 
+ruby_version: 2.1.2
+ruby_tarball: ruby-{{ ruby_version }}.tar.gz
+ruby_url: http://cache.ruby-lang.org/pub/ruby/2.1/{{ ruby_tarball }}
+
 gitlab_repo: https://gitlab.com/gitlab-org/gitlab-ce.git
 gitlab_version: 6-9-stable
-gitlab_dir: "/home/{{ system_username }}/gitlab"
-gitlab_satellite_dir: "/home/{{ system_username }}/gitlab-satellites"
+gitlab_dir: "{{ system_user_home }}/gitlab"
+gitlab_satellite_dir: "{{ system_user_home }}/gitlab-satellites"
 gitlab_hostname: "{{ ansible_fqdn }}"
 gitlab_port: 80
 gitlab_https: false
 gitlab_default_email: example@example.com
 gitlab_support_email: support@example.com
+
+git_user_name: GitLab
+git_user_email: "{{ gitlab_default_email }}"
+git_core_autocrlf: input
