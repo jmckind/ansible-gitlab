@@ -18,18 +18,23 @@
     - libxslt-dev
     - libyaml-dev
     - logrotate
+    - postgresql-server-dev-all
     - redis-server
-    - ruby2.0
     - zlib1g-dev
 
+- name: ensure the ruby source is present
+  get_url: url={{ ruby_url }} dest=/tmp
+
+- name: ensure ruby is installed
+  shell: tar xzf {{ ruby_tarball }}; cd ruby-{{ ruby_version }}; ./configure --prefix=/usr --disable-install-rdoc; make; make install chdir=/tmp creates=/usr/bin/ruby
+
 - name: ensure required ruby gems are installed
-  gem: name={{ item }} state=latest user_install=no executable=/usr/bin/gem2.0
+  gem: name={{ item }} state=latest user_install=no
   with_items:
     - bundler
-    - rake
 
 - name: ensure the GitLab system user is present
-  user: name={{ system_username }} shell=/usr/sbin/nologin comment="GitLab"
+  user: name={{ system_username }} shell=/bin/bash comment="GitLab"
 
 - name: ensure the GitLab database user is present
   postgresql_user: name={{ db_username }} password={{ db_password }} role_attr_flags=CREATEDB,NOSUPERUSER
@@ -41,13 +46,14 @@
   git: repo={{ gitlab_repo }} version={{ gitlab_version }} dest={{ gitlab_dir }}
 
 - name: ensure that permissions are set for the GitLab source directory
-  file: path={{ gitlab_dir }} mode=0760 owner={{ system_username }} group={{ system_username }}
+  file: path={{ gitlab_dir }} owner={{ system_username }} group={{ system_username }} recurse=yes
 
 - name: ensure the GitLab configuration file is present
-  template: src=config/gitlab.yml.j2 dest="{{ gitlab_dir }}/config/gitlab.yml" mode=0644 owner={{ system_username }} group={{ system_username }} #"
+  template: src=config/gitlab.yml.j2 dest={{ gitlab_dir }}/config/gitlab.yml mode=0644 owner={{ system_username }} group={{ system_username }}
+  notify: restart gitlab
 
 - name: ensure that the GitLab working directories are present
-  file: path="{{ gitlab_dir }}/{{ item }}" state=directory mode=0760 owner={{ system_username }} group={{ system_username }} #"
+  file: path={{ gitlab_dir }}/{{ item }} state=directory mode=0755 owner={{ system_username }} group={{ system_username }}
   with_items:
     - log
     - public/uploads
@@ -55,26 +61,67 @@
     - tmp/pids
     - tmp/sockets
 
+- name: ensure the GitLab unicorn configuration file is present
+  template: src=config/unicorn.rb.j2 dest={{ gitlab_dir }}/config/unicorn.rb mode=0644 owner={{ system_username }} group={{ system_username }}
+
+- name: ensure the GitLab rack attack configuration file is present
+  template: src=config/rack_attack.rb.j2 dest={{ gitlab_dir }}/config/rack_attack.rb mode=0644 owner={{ system_username }} group={{ system_username }}
+
+- name: ensure the global git user name is set
+  sudo_user: "{{ system_username }}"
+  command: git config --global user.name {{ git_user_name }} chdir={{ system_user_home }}
+
+- name: ensure the global git user email is set
+  sudo_user: "{{ system_username }}"
+  command: git config --global user.email {{ git_user_email }} chdir={{ system_user_home }}
+
+- name: ensure the global git core autocrlf is set
+  sudo_user: "{{ system_username }}"
+  command: git config --global core.autocrlf {{ git_core_autocrlf }} chdir={{ system_user_home }}
+
 - name: ensure that the GitLab satellite directory is present
   file: path={{ gitlab_satellite_dir }} state=directory owner={{ system_username }} group={{ system_username }}
 
 - name: ensure that permissions are set for the GitLab satellite directory
-  file: path={{ gitlab_satellite_dir }} mode=0760 owner={{ system_username }} group={{ system_username }}
-  with_items:
-    - log
-    - tmp
+  file: path={{ gitlab_satellite_dir }} mode=0750 owner={{ system_username }} group={{ system_username }}
 
 - name: ensure the GitLab database configuration file is present
-  template: src=config/database.yml.j2 dest="{{ gitlab_dir }}/config/database.yml" mode=0600 owner={{ system_username }} group={{ system_username }} #"
+  template: src=config/database.yml.j2 dest={{ gitlab_dir }}/config/database.yml mode=0600 owner={{ system_username }} group={{ system_username }}
+  notify: restart gitlab
 
-- name: ensure the gitlab gems are installed
+- name: ensure the GitLab gems are installed
   sudo_user: "{{ system_username }}"
-  shell: bundle install -j{{ ansible_processor_cores }} --deployment --without development test mysql aws > /tmp/bundle-gems chdir={{ gitlab_dir }} creates=/tmp/bundle-gems
+  shell: bundle install -j{{ ansible_processor_cores }} --deployment --without development test mysql aws chdir={{ gitlab_dir }} creates={{ gitlab_dir }}/vendor/bundle
 
-- name: ensure the gitlab shell is installed
+- name: ensure the GitLab shell is installed
   sudo_user: "{{ system_username }}"
-  shell: bundle exec rake gitlab:shell:install[v1.9.5] REDIS_URL=redis://localhost:6379 RAILS_ENV=production > /tmp/bundle-shell chdir={{ gitlab_dir }} creates=/tmp/bundle-shell
+  shell: bundle exec rake gitlab:shell:install[v1.9.5] REDIS_URL=redis://localhost:6379 RAILS_ENV=production chdir={{ gitlab_dir }} creates={{ system_user_home }}/gitlab-shell
 
-- name: ensure the gitlab database is initialized
+- name: ensure the GitLab database is initialized
   sudo_user: "{{ system_username }}"
-  shell: echo 'yes' | bundle exec rake gitlab:shell:install[v1.9.5] REDIS_URL=redis://localhost:6379 RAILS_ENV=production > /tmp/gitlab-db chdir={{ gitlab_dir }} creates=/tmp/gitlab-db
+  shell: echo 'yes' | bundle exec rake gitlab:setup RAILS_ENV=production > {{ gitlab_dir }}/log/db-init.log chdir={{ gitlab_dir }} creates={{ gitlab_dir }}/log/db-init.log
+
+- name: ensure GitLab init script is present
+  command: cp {{ gitlab_dir }}/lib/support/init.d/gitlab /etc/init.d/ creates=/etc/init.d/gitlab
+  notify: restart gitlab
+
+- name: ensure GitLab starts on boot
+  command: update-rc.d gitlab defaults 21 creates=/etc/rc2.d/S21gitlab
+
+- name: ensure logrotate is configured for GitLab
+  command: cp {{ gitlab_dir }}/lib/support/logrotate/gitlab /etc/logrotate.d/ creates=/etc/logrotate.d/gitlab
+
+- name: ensure GitLab assets are compiled
+  sudo_user: "{{ system_username }}"
+  shell: bundle exec rake assets:precompile RAILS_ENV=production chdir={{ gitlab_dir }} creates={{ gitlab_dir }}/public/assets
+
+- name: ensure the GitLab site configuration for nginx is present
+  template: src=nginx/gitlab.j2 dest=/etc/nginx/sites-available/gitlab
+
+- name: ensure the GitLab site for nginx is enabled
+  file: src=/etc/nginx/sites-available/gitlab dest=/etc/nginx/sites-enabled/gitlab state=link
+  notify: restart nginx
+
+- name: ensure the default site for nginx is disabled
+  file: path=/etc/nginx/sites-enabled/default state=absent
+  notify: restart nginx
